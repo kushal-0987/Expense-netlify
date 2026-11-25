@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { updateGroup, updateGroupSettings, updateProfile } from "@/lib/data/api";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/_shell/settings")({
   head: () => ({ meta: [{ title: "Settings — Family Expense Tracker" }, { name: "description", content: "Profile, group and permission settings." }] }),
@@ -24,6 +25,31 @@ function SettingsPage() {
   const signOut = useSignOut();
   const [fullName, setFullName] = useState(profile?.full_name ?? "");
   const [groupName, setGroupName] = useState(group.name);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [busyPassword, setBusyPassword] = useState(false);
+
+  async function changePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (newPassword.length < 8) {
+      return toast.error("Use at least 8 characters for your new password.");
+    }
+    if (newPassword !== confirmPassword) {
+      return toast.error("The two passwords do not match.");
+    }
+    setBusyPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      toast.success("Password updated successfully!");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update password");
+    } finally {
+      setBusyPassword(false);
+    }
+  }
 
   async function run(fn: () => Promise<void>, msg: string) {
     try { await fn(); await refresh(); toast.success(msg); }
@@ -45,6 +71,40 @@ function SettingsPage() {
           <div className="space-y-1.5"><Label>Email</Label><Input value={user.email ?? ""} disabled /></div>
           <div className="space-y-1.5"><Label htmlFor="fn">Full name</Label><Input id="fn" maxLength={60} value={fullName} onChange={(e) => setFullName(e.target.value)} /></div>
           <Button onClick={() => run(() => updateProfile(user.id, { full_name: fullName.trim() }), "Profile saved")}>Save profile</Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>Change password</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={changePassword} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="npw">New password</Label>
+              <Input
+                id="npw"
+                type="password"
+                placeholder="At least 8 characters"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cpw">Confirm new password</Label>
+              <Input
+                id="cpw"
+                type="password"
+                placeholder="Repeat new password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={busyPassword || !newPassword}>
+              {busyPassword ? "Updating..." : "Update password"}
+            </Button>
+          </form>
         </CardContent>
       </Card>
       {me && (
