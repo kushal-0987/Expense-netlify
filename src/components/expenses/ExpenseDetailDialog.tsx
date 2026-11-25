@@ -1,0 +1,123 @@
+import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { toast } from "sonner";
+import { CalendarDays, Pencil, Trash2, User } from "lucide-react";
+import { useGroup } from "@/hooks/use-group";
+import type { Expense } from "@/lib/data/types";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { MemberAvatar } from "@/components/app/MemberAvatar";
+import { CategoryBadge, CategoryIcon } from "./CategoryBadge";
+import { formatDate, formatTime } from "@/lib/dates";
+import { formatPercent } from "@/lib/finance/money";
+import { deleteExpense } from "@/lib/data/api";
+
+const SPLIT_LABEL = { equal: "Split equally", exact: "Exact amounts", percentage: "By percentage", individual: "Individual expense" } as const;
+
+export function ExpenseDetailDialog({ expense, onOpenChange }: { expense: Expense | null; onOpenChange: (v: boolean) => void }) {
+  const { fmt, memberName, memberById, can, refresh } = useGroup();
+  const navigate = useNavigate();
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const e = expense;
+
+  async function remove() {
+    if (!e) return;
+    setBusy(true);
+    try {
+      await deleteExpense(e.id);
+      toast.success("Expense deleted");
+      await refresh();
+      setConfirm(false);
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Dialog open={!!e} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-lg">
+          {e && (
+            <>
+              <DialogHeader>
+                <div className="flex items-start gap-3">
+                  <CategoryIcon category={e.category} />
+                  <div className="min-w-0 text-left">
+                    <DialogTitle className="text-lg">{e.title}</DialogTitle>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <CategoryBadge category={e.category} />
+                      <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />{formatDate(e.expense_date)} {formatTime(e.expense_time)}</span>
+                    </div>
+                  </div>
+                </div>
+              </DialogHeader>
+              <div className="rounded-2xl bg-muted p-4">
+                <div className="text-xs font-semibold text-muted-foreground">Total</div>
+                <div className="tabular text-3xl font-semibold">{fmt(e.amount_minor)}</div>
+                <div className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <User className="h-3.5 w-3.5" /> Paid by <span className="font-semibold text-foreground">{memberName(e.paid_by)}</span> · {SPLIT_LABEL[e.split_method]}
+                </div>
+              </div>
+              <div>
+                <div className="mb-2 text-sm font-bold">Shares</div>
+                <ul className="divide-y rounded-xl border">
+                  {e.participants.map((p) => {
+                    const m = memberById(p.member_id);
+                    return (
+                      <li key={p.id} className="flex items-center gap-3 px-3 py-2.5">
+                        <MemberAvatar name={m?.name ?? "?"} seed={p.member_id} size="xs" />
+                        <span className="flex-1 text-sm">{m?.name ?? "Former member"}</span>
+                        {p.percentage_bps != null && <span className="text-xs text-muted-foreground">{formatPercent(p.percentage_bps)}</span>}
+                        <span className="tabular text-sm font-bold">{fmt(p.share_minor)}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+              {(e.description || e.notes) && (
+                <div className="space-y-1 text-sm">
+                  {e.description && <p>{e.description}</p>}
+                  {e.notes && <p className="text-muted-foreground">Note: {e.notes}</p>}
+                </div>
+              )}
+              {can.editExpense(e) && (
+                <div className="flex justify-end gap-2">
+                  <Button variant="danger-soft" onClick={() => setConfirm(true)}><Trash2 /> Delete</Button>
+                  <Button onClick={() => navigate({ to: "/expenses/$expenseId/edit", params: { expenseId: e.id } })}><Pencil /> Edit</Button>
+                </div>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+      <AlertDialog open={confirm} onOpenChange={setConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this expense?</AlertDialogTitle>
+            <AlertDialogDescription>Everyone's balance will be recalculated. This can't be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={(ev) => { ev.preventDefault(); remove(); }} disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}

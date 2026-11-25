@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1795249052373,
+      "tag": "0000_member_pin_login",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795426759555,
+      "tag": "0001_esewa_payment_details",
+      "breakpoints": true
+    }
+  ]
+}
