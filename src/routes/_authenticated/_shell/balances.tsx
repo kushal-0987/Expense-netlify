@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { ArrowRight, Handshake, MessageCircle, Scale, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
+import { ArrowRight, BellRing, Handshake, Loader2, MessageCircle, Scale, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { useGroup } from "@/hooks/use-group";
 import { PageHeader } from "@/components/app/PageHeader";
 import { StatCard } from "@/components/app/StatCard";
@@ -12,13 +14,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { BellRing } from "lucide-react";
 import { simplifyDebts } from "@/lib/finance/balances";
 import { PayDialog } from "@/components/payments/PayDialog";
 import { reminderMessage, whatsappLink } from "@/lib/payments/esewa";
 import type { Member } from "@/lib/data/types";
 import { AiReminderDialog, type AiReminderTarget } from "@/components/payments/AiReminderDialog";
-import { Sparkles } from "lucide-react";
+import { notifyDue, notifyAllDues } from "@/lib/notifications/notification.functions";
+import { showBrowserNotification } from "@/lib/notifications/web-push";
 
 export const Route = createFileRoute("/_authenticated/_shell/balances")({
   head: () => ({ meta: [{ title: "Balances — Family Expense Tracker" }, { name: "description", content: "Who owes whom, and the fewest payments to settle up." }] }),
@@ -32,6 +34,68 @@ function BalancesPage() {
   const [settle, setSettle] = useState<SettlementPrefill | null>(null);
   const [aiTarget, setAiTarget] = useState<AiReminderTarget | null>(null);
   const [pay, setPay] = useState<{ receiver: Member; amountText: string } | null>(null);
+
+  const sendDueReminder = useServerFn(notifyDue);
+  const sendAllDueReminders = useServerFn(notifyAllDues);
+  const [remindingKey, setRemindingKey] = useState<string | null>(null);
+  const [remindingAll, setRemindingAll] = useState(false);
+
+  async function pushDueNotification(from: string, to: string, amount: number) {
+    const debtor = memberById(from);
+    if (!debtor?.email) {
+      toast.error(`${memberName(from)} does not have an email address configured`);
+      return;
+    }
+    const key = `${from}-${to}`;
+    setRemindingKey(key);
+    try {
+      const res = await sendDueReminder({
+        data: {
+          groupId: group.id,
+          debtorMemberId: from,
+          receiverMemberId: to,
+          amountMinor: amount,
+          appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        },
+      });
+      toast.success(res.message);
+      showBrowserNotification(`Due Reminder: ${memberName(from)}`, {
+        body: `Payment reminder of ${fmt(amount)} sent to ${debtor.email}.`,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send due reminder");
+    } finally {
+      setRemindingKey(null);
+    }
+  }
+
+  async function pushAllDueNotifications() {
+    if (suggestions.length === 0) return;
+    setRemindingAll(true);
+    try {
+      const dues = suggestions.map((s) => ({
+        debtorMemberId: s.from,
+        receiverMemberId: s.to,
+        amountMinor: s.amount,
+      }));
+      const res = await sendAllDueReminders({
+        data: {
+          groupId: group.id,
+          dues,
+          appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        },
+      });
+      toast.success(res.message);
+      showBrowserNotification("Due Reminders Sent", {
+        body: `Pushed notifications to ${res.notifiedCount} debtor(s) with valid email.`,
+      });
+      setPushOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to push reminders");
+    } finally {
+      setRemindingAll(false);
+    }
+  }
 
   function remindLink(from: string, to: string, amount: number) {
     const debtor = memberById(from);
@@ -102,26 +166,71 @@ function BalancesPage() {
       />
 
       <Dialog open={pushOpen} onOpenChange={setPushOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Push reminders to everyone who owes</DialogTitle>
-            <DialogDescription>Tap each person to send their WhatsApp reminder with the amount and eSewa details.</DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <BellRing className="h-5 w-5 text-primary" />
+              Push reminders to everyone who owes
+            </DialogTitle>
+            <DialogDescription>
+              Dispatch push and email reminders with balance and payment details to members who have dues.
+            </DialogDescription>
           </DialogHeader>
-          <ul className="space-y-2">
-            {suggestions.map((t) => (
-              <li key={`p-${t.from}-${t.to}`} className="flex items-center gap-3 rounded-xl border p-3">
-                <MemberAvatar name={memberName(t.from)} seed={t.from} size="sm" />
-                <div className="min-w-0 flex-1 text-sm">
-                  <div className="font-semibold">{memberName(t.from)}</div>
-                  <div className="text-muted-foreground">owes {memberName(t.to)} {fmt(t.amount)}</div>
-                </div>
-                <Button asChild size="sm" variant="outline">
-                  <a href={remindLink(t.from, t.to, t.amount)} target="_blank" rel="noreferrer"><MessageCircle /> Send</a>
-                </Button>
-                <Button size="sm" variant="soft" onClick={() => openAi(t.from, t.to, t.amount)}><Sparkles /> Email</Button>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-3">
+            <Button
+              onClick={pushAllDueNotifications}
+              disabled={remindingAll}
+              className="w-full bg-gradient-primary shadow-glow"
+            >
+              {remindingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <BellRing className="h-4 w-4" />}
+              Push notification to all ({suggestions.length})
+            </Button>
+            <ul className="space-y-2 max-h-72 overflow-y-auto">
+              {suggestions.map((t) => {
+                const key = `${t.from}-${t.to}`;
+                const debtor = memberById(t.from);
+                const hasEmail = !!debtor?.email;
+                return (
+                  <li key={`p-${key}`} className="flex items-center gap-2.5 rounded-xl border p-2.5">
+                    <MemberAvatar name={memberName(t.from)} seed={t.from} size="sm" />
+                    <div className="min-w-0 flex-1 text-xs">
+                      <div className="font-semibold text-sm truncate">{memberName(t.from)}</div>
+                      <div className="text-muted-foreground truncate">
+                        owes {memberName(t.to)} <span className="font-semibold text-primary">{fmt(t.amount)}</span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {debtor?.email ? debtor.email : "No email configured"}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        disabled={!hasEmail || remindingKey === key}
+                        onClick={() => pushDueNotification(t.from, t.to, t.amount)}
+                        title={hasEmail ? `Send email & in-app push to ${debtor?.email}` : "Member needs an email address to receive push notifications"}
+                      >
+                        {remindingKey === key ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <BellRing className="h-3.5 w-3.5" />
+                        )}
+                        Push
+                      </Button>
+                      <Button asChild size="sm" variant="outline">
+                        <a href={remindLink(t.from, t.to, t.amount)} target="_blank" rel="noreferrer" title="WhatsApp reminder">
+                          <MessageCircle className="h-3.5 w-3.5" />
+                        </a>
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => openAi(t.from, t.to, t.amount)} title="AI email draft">
+                        <Sparkles className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -197,9 +306,25 @@ function BalancesPage() {
                         ) : null;
                       })()}
                       {t.from !== me?.id && (
-                        <Button size="sm" variant="ghost" asChild>
-                          <a href={remindLink(t.from, t.to, t.amount)} target="_blank" rel="noreferrer"><MessageCircle /> Remind on WhatsApp</a>
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="soft"
+                            disabled={!memberById(t.from)?.email || remindingKey === `${t.from}-${t.to}`}
+                            onClick={() => pushDueNotification(t.from, t.to, t.amount)}
+                            title={memberById(t.from)?.email ? `Send push notification & email to ${memberById(t.from)?.email}` : "Add member email to send notification"}
+                          >
+                            {remindingKey === `${t.from}-${t.to}` ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <BellRing className="h-3.5 w-3.5" />
+                            )}
+                            Push notification
+                          </Button>
+                          <Button size="sm" variant="ghost" asChild>
+                            <a href={remindLink(t.from, t.to, t.amount)} target="_blank" rel="noreferrer"><MessageCircle /> WhatsApp</a>
+                          </Button>
+                        </>
                       )}
                       {isAdmin && (
                         <Button size="sm" variant="ghost" onClick={() => openAi(t.from, t.to, t.amount)}><Sparkles /> AI email</Button>

@@ -1,13 +1,16 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, AlertCircle, Loader2, BellRing } from "lucide-react";
 import { useGroup } from "@/hooks/use-group";
 import type { Expense } from "@/lib/data/types";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { currencySymbol, minorToInput, parseMoney, formatPercent } from "@/lib/finance/money";
 import { computeShares, evenPercents, type SplitMethod, type SplitRow } from "@/lib/finance/split";
 import { saveExpense } from "@/lib/data/api";
+import { notifyExpense } from "@/lib/notifications/notification.functions";
+import { showBrowserNotification } from "@/lib/notifications/web-push";
 import { nowTime, todayISO } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +32,8 @@ const METHODS: { value: SplitMethod; label: string; hint: string }[] = [
 export function ExpenseForm({ expense }: { expense?: Expense | undefined }) {
   const { group, activeMembers, members, me, settings, fmt, refresh } = useGroup();
   const navigate = useNavigate();
+  const sendNotify = useServerFn(notifyExpense);
+  const [notifyPush, setNotifyPush] = useState(true);
   // Editing keeps members who have since become inactive but are on the expense.
   const formMembers = useMemo(() => {
     if (!expense) return activeMembers;
@@ -94,7 +99,7 @@ export function ExpenseForm({ expense }: { expense?: Expense | undefined }) {
     if (result.error) return void toast.error(result.error);
     setBusy(true);
     try {
-      await saveExpense({
+      const savedId = await saveExpense({
         id: expense?.id ?? null,
         groupId: group.id,
         title: title.trim(),
@@ -108,6 +113,26 @@ export function ExpenseForm({ expense }: { expense?: Expense | undefined }) {
         notes: notes.trim(),
         participants: result.shares,
       });
+
+      if (notifyPush && (savedId || expense?.id)) {
+        const targetId = savedId || expense!.id;
+        try {
+          const res = await sendNotify({
+            data: {
+              expenseId: targetId,
+              groupId: group.id,
+              appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+            },
+          });
+          toast.success(res.message);
+          showBrowserNotification(`Expense Added: ${title.trim()}`, {
+            body: `${fmt(amountMinor)} paid. Push notification sent to members.`,
+          });
+        } catch (pushErr) {
+          console.warn("Could not dispatch push notification:", pushErr);
+        }
+      }
+
       await refresh();
       toast.success(expense ? "Expense updated" : "Expense added");
       navigate({ to: "/expenses" });
@@ -289,6 +314,22 @@ export function ExpenseForm({ expense }: { expense?: Expense | undefined }) {
                 <CheckCircle2 className="h-4 w-4 shrink-0" /> Shares add up exactly.
               </div>
             )}
+            <label className="flex items-start gap-2.5 rounded-xl border border-primary/25 bg-primary-soft/40 p-3 text-xs cursor-pointer hover:bg-primary-soft/60 transition">
+              <Checkbox
+                checked={notifyPush}
+                onCheckedChange={(v) => setNotifyPush(!!v)}
+                className="mt-0.5"
+              />
+              <div className="flex-1 space-y-0.5 select-none">
+                <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                  <BellRing className="h-3.5 w-3.5 text-primary" />
+                  Push notification ({activeMembers.filter((m) => !!m.email).length} email + admin)
+                </div>
+                <div className="text-muted-foreground">
+                  Sends email & in-app push alert with each person's share immediately.
+                </div>
+              </div>
+            </label>
             <div className="flex gap-2">
               <Button type="button" variant="outline" className="flex-1" onClick={() => navigate({ to: "/expenses" })}>Cancel</Button>
               <Button type="submit" className="flex-1" disabled={busy}>

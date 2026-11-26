@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { CalendarDays, Pencil, Trash2, User } from "lucide-react";
+import { BellRing, CalendarDays, Loader2, Pencil, Trash2, User } from "lucide-react";
 import { useGroup } from "@/hooks/use-group";
 import type { Expense } from "@/lib/data/types";
 import { Button } from "@/components/ui/button";
@@ -21,15 +22,41 @@ import { CategoryBadge, CategoryIcon } from "./CategoryBadge";
 import { formatDate, formatTime } from "@/lib/dates";
 import { formatPercent } from "@/lib/finance/money";
 import { deleteExpense } from "@/lib/data/api";
+import { notifyExpense } from "@/lib/notifications/notification.functions";
+import { showBrowserNotification } from "@/lib/notifications/web-push";
 
 const SPLIT_LABEL = { equal: "Split equally", exact: "Exact amounts", percentage: "By percentage", individual: "Individual expense" } as const;
 
 export function ExpenseDetailDialog({ expense, onOpenChange }: { expense: Expense | null; onOpenChange: (v: boolean) => void }) {
-  const { fmt, memberName, memberById, can, refresh } = useGroup();
+  const { fmt, memberName, memberById, can, refresh, group } = useGroup();
   const navigate = useNavigate();
+  const sendNotify = useServerFn(notifyExpense);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [notifying, setNotifying] = useState(false);
   const e = expense;
+
+  async function pushNotification() {
+    if (!e) return;
+    setNotifying(true);
+    try {
+      const res = await sendNotify({
+        data: {
+          expenseId: e.id,
+          groupId: group.id,
+          appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+        },
+      });
+      toast.success(res.message);
+      showBrowserNotification(`Expense Notification: ${e.title}`, {
+        body: `${fmt(e.amount_minor)} — Push sent to members.`,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send push notification");
+    } finally {
+      setNotifying(false);
+    }
+  }
 
   async function remove() {
     if (!e) return;
@@ -94,12 +121,25 @@ export function ExpenseDetailDialog({ expense, onOpenChange }: { expense: Expens
                   {e.notes && <p className="text-muted-foreground">Note: {e.notes}</p>}
                 </div>
               )}
-              {can.editExpense(e) && (
-                <div className="flex justify-end gap-2">
-                  <Button variant="danger-soft" onClick={() => setConfirm(true)}><Trash2 /> Delete</Button>
-                  <Button onClick={() => navigate({ to: "/expenses/$expenseId/edit", params: { expenseId: e.id } })}><Pencil /> Edit</Button>
-                </div>
-              )}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={pushNotification}
+                  disabled={notifying}
+                  className="border-primary/30 text-primary hover:bg-primary-soft"
+                >
+                  {notifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <BellRing className="h-4 w-4" />}
+                  Push notification
+                </Button>
+                {can.editExpense(e) && (
+                  <div className="flex gap-2">
+                    <Button variant="danger-soft" size="sm" onClick={() => setConfirm(true)}><Trash2 className="h-3.5 w-3.5" /> Delete</Button>
+                    <Button size="sm" onClick={() => navigate({ to: "/expenses/$expenseId/edit", params: { expenseId: e.id } })}><Pencil className="h-3.5 w-3.5" /> Edit</Button>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </DialogContent>

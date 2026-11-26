@@ -1,11 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
-import { Bell, CheckCheck, Handshake, Receipt } from "lucide-react";
+import { Bell, BellRing, CheckCheck, Handshake, Receipt } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { notificationsQuery, qk } from "@/lib/data/queries";
 import { markNotificationsRead } from "@/lib/data/api";
+import { requestBrowserNotificationPermission } from "@/lib/notifications/web-push";
 import { cn } from "@/lib/utils";
 
 export function NotificationsMenu({ userId }: { userId: string }) {
@@ -18,6 +20,12 @@ export function NotificationsMenu({ userId }: { userId: string }) {
     if (!unread.length) return;
     await markNotificationsRead(userId);
     queryClient.invalidateQueries({ queryKey: qk.notifications(userId) });
+  }
+
+  async function enableBrowserPush() {
+    const perm = await requestBrowserNotificationPermission();
+    if (perm === "granted") toast.success("Browser push notifications enabled!");
+    else toast.info("Browser notifications not allowed or dismissed");
   }
 
   return (
@@ -56,6 +64,7 @@ export function NotificationsMenu({ userId }: { userId: string }) {
                     }
                     if (n.link === "/settlements") navigate({ to: "/settlements" });
                     else if (n.link === "/expenses") navigate({ to: "/expenses" });
+                    else if (n.link === "/balances") navigate({ to: "/balances" });
                   }}
                 >
                   <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
@@ -74,6 +83,14 @@ export function NotificationsMenu({ userId }: { userId: string }) {
             })
           )}
         </div>
+        {typeof window !== "undefined" && "Notification" in window && Notification.permission !== "granted" && (
+          <div className="border-t p-2 bg-muted/30">
+            <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground justify-start gap-2" onClick={enableBrowserPush}>
+              <BellRing className="h-3.5 w-3.5 text-primary" />
+              Enable browser desktop alerts
+            </Button>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );
