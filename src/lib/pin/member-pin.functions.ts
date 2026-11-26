@@ -147,8 +147,16 @@ export const pinLogin = createServerFn({ method: "POST" })
     if (isLocked(pin.locked_until, now)) throw new Error("Too many wrong tries. Try again in 15 minutes.");
 
     const { createClient } = await import("@supabase/supabase-js");
-    const key = process.env["SUPABASE_PUBLISHABLE_KEY"] || process.env["VITE_SUPABASE_PUBLISHABLE_KEY"]!;
-    const supabaseUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"]!;
+    const key =
+      process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+      process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+      (typeof import.meta !== "undefined" ? import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY : "") ||
+      "";
+    const supabaseUrl =
+      process.env["SUPABASE_URL"] ||
+      process.env["VITE_SUPABASE_URL"] ||
+      (typeof import.meta !== "undefined" ? import.meta.env?.VITE_SUPABASE_URL : "") ||
+      "";
     const pub = createClient(supabaseUrl, key, {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { fetch: (input, init) => {

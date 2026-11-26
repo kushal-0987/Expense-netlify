@@ -73,7 +73,9 @@ function JoinPage() {
           <div className="py-12 text-center"><Loader2 className="mx-auto animate-spin text-muted-foreground" /></div>
         ) : invite.isError ? (
           <p className="mt-6 text-sm text-destructive">
-            Invite login is not configured on the server yet. Add SUPABASE_SERVICE_ROLE_KEY and MEMBER_PIN_SECRET to environment variables.
+            {invite.error instanceof Error
+              ? invite.error.message
+              : "Invite login is not configured on the server yet."}
           </p>
         ) : !invite.data ? (
           <p className="mt-6 text-sm text-muted-foreground">This invite link isn&apos;t valid anymore. Ask your household admin for a new one.</p>
