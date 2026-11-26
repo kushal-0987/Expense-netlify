@@ -313,6 +313,74 @@ export type Database = {
           },
         ]
       }
+      email_logs: {
+        Row: {
+          created_at: string
+          delivered_at: string | null
+          error_message: string | null
+          group_id: string
+          id: string
+          idempotency_key: string | null
+          metadata: Json | null
+          notification_id: string | null
+          notification_type: string
+          recipient_email: string
+          recipient_member_id: string | null
+          recipient_name: string | null
+          resend_email_id: string | null
+          sent_at: string | null
+          status: string
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          delivered_at?: string | null
+          error_message?: string | null
+          group_id: string
+          id?: string
+          idempotency_key?: string | null
+          metadata?: Json | null
+          notification_id?: string | null
+          notification_type: string
+          recipient_email: string
+          recipient_member_id?: string | null
+          recipient_name?: string | null
+          resend_email_id?: string | null
+          sent_at?: string | null
+          status?: string
+          subject: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          delivered_at?: string | null
+          error_message?: string | null
+          group_id?: string
+          id?: string
+          idempotency_key?: string | null
+          metadata?: Json | null
+          notification_id?: string | null
+          notification_type?: string
+          recipient_email?: string
+          recipient_member_id?: string | null
+          recipient_name?: string | null
+          resend_email_id?: string | null
+          sent_at?: string | null
+          status?: string
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_logs_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null

@@ -124,7 +124,13 @@ export function ExpenseForm({ expense }: { expense?: Expense | undefined }) {
               appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
             },
           });
-          toast.success(res.message);
+          if (res.acceptedCount > 0) {
+            toast.success(res.summaryMessage);
+          } else if (!res.providerConfigured) {
+            toast.warning(res.summaryMessage);
+          } else {
+            toast.error(res.summaryMessage);
+          }
           showBrowserNotification(`Expense Added: ${title.trim()}`, {
             body: `${fmt(amountMinor)} paid. Push notification sent to members.`,
           });

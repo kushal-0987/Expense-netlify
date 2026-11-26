@@ -135,6 +135,26 @@ CREATE TABLE IF NOT EXISTS public.member_pins (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.email_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  group_id uuid NOT NULL REFERENCES public.groups(id) ON DELETE CASCADE,
+  notification_id uuid REFERENCES public.notifications(id) ON DELETE SET NULL,
+  recipient_email text NOT NULL,
+  recipient_name text,
+  recipient_member_id uuid REFERENCES public.group_members(id) ON DELETE SET NULL,
+  subject text NOT NULL,
+  notification_type text NOT NULL,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'delivered', 'delayed', 'bounced', 'failed')),
+  resend_email_id text,
+  error_message text,
+  idempotency_key text,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  sent_at timestamptz,
+  delivered_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- 4. Auto-create profile on sign-up / Google login
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger

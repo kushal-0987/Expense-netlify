@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ArrowRight, BellRing, Handshake, Loader2, MessageCircle, Scale, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { ArrowRight, BellRing, Handshake, Loader2, Mail, MessageCircle, Scale, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { useGroup } from "@/hooks/use-group";
 import { PageHeader } from "@/components/app/PageHeader";
 import { StatCard } from "@/components/app/StatCard";
@@ -19,8 +19,10 @@ import { PayDialog } from "@/components/payments/PayDialog";
 import { reminderMessage, whatsappLink } from "@/lib/payments/esewa";
 import type { Member } from "@/lib/data/types";
 import { AiReminderDialog, type AiReminderTarget } from "@/components/payments/AiReminderDialog";
-import { notifyDue, notifyAllDues } from "@/lib/notifications/notification.functions";
+import { notifyDue, notifyAllDues, type NotificationDeliveryReport } from "@/lib/notifications/notification.functions";
 import { showBrowserNotification } from "@/lib/notifications/web-push";
+import { NotificationReportDialog } from "@/components/notifications/NotificationReportDialog";
+import { EmailAuditDialog } from "@/components/notifications/EmailAuditDialog";
 
 export const Route = createFileRoute("/_authenticated/_shell/balances")({
   head: () => ({ meta: [{ title: "Balances — Family Expense Tracker" }, { name: "description", content: "Who owes whom, and the fewest payments to settle up." }] }),
@@ -34,6 +36,8 @@ function BalancesPage() {
   const [settle, setSettle] = useState<SettlementPrefill | null>(null);
   const [aiTarget, setAiTarget] = useState<AiReminderTarget | null>(null);
   const [pay, setPay] = useState<{ receiver: Member; amountText: string } | null>(null);
+  const [report, setReport] = useState<NotificationDeliveryReport | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   const sendDueReminder = useServerFn(notifyDue);
   const sendAllDueReminders = useServerFn(notifyAllDues);
@@ -58,7 +62,13 @@ function BalancesPage() {
           appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
         },
       });
-      toast.success(res.message);
+      if (res.success) {
+        toast.success(res.message);
+      } else if (!res.providerConfigured) {
+        toast.warning(res.message);
+      } else {
+        toast.error(res.message);
+      }
       showBrowserNotification(`Due Reminder: ${memberName(from)}`, {
         body: `Payment reminder of ${fmt(amount)} sent to ${debtor.email}.`,
       });
@@ -85,9 +95,16 @@ function BalancesPage() {
           appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
         },
       });
-      toast.success(res.message);
+      setReport(res);
+      if (res.acceptedCount > 0) {
+        toast.success(res.summaryMessage);
+      } else if (!res.providerConfigured) {
+        toast.warning(res.summaryMessage);
+      } else {
+        toast.error(res.summaryMessage);
+      }
       showBrowserNotification("Due Reminders Sent", {
-        body: `Pushed notifications to ${res.notifiedCount} debtor(s) with valid email.`,
+        body: `Pushed notifications to ${res.acceptedCount} debtor(s) with valid email.`,
       });
       setPushOpen(false);
     } catch (err) {
@@ -157,6 +174,9 @@ function BalancesPage() {
           {isAdmin && suggestions.length > 0 && (
             <Button onClick={() => setPushOpen(true)} className="bg-gradient-primary shadow-glow"><BellRing /> Push reminders</Button>
           )}
+          <Button variant="outline" size="sm" onClick={() => setAuditOpen(true)} className="h-9">
+            <Mail className="h-4 w-4 mr-1.5" /> Email logs
+          </Button>
           <label className="flex items-center gap-2 rounded-xl border bg-card px-3 py-2 text-sm font-semibold">
             <Switch checked={projected} onCheckedChange={setProjected} />
             Include pending settlements
@@ -341,6 +361,19 @@ function BalancesPage() {
       <AiReminderDialog target={aiTarget} onClose={() => setAiTarget(null)} />
       <PayDialog receiver={pay?.receiver ?? null} amountText={pay?.amountText} onClose={() => setPay(null)} />
       <SettlementDialog open={!!settle} onOpenChange={(v) => !v && setSettle(null)} prefill={settle ?? undefined} />
+
+      <NotificationReportDialog
+        report={report}
+        open={!!report}
+        onOpenChange={(v) => !v && setReport(null)}
+        onOpenAudit={() => setAuditOpen(true)}
+      />
+
+      <EmailAuditDialog
+        groupId={group.id}
+        open={auditOpen}
+        onOpenChange={setAuditOpen}
+      />
     </div>
   );
 }

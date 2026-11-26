@@ -22,8 +22,10 @@ import { CategoryBadge, CategoryIcon } from "./CategoryBadge";
 import { formatDate, formatTime } from "@/lib/dates";
 import { formatPercent } from "@/lib/finance/money";
 import { deleteExpense } from "@/lib/data/api";
-import { notifyExpense } from "@/lib/notifications/notification.functions";
+import { notifyExpense, type NotificationDeliveryReport } from "@/lib/notifications/notification.functions";
 import { showBrowserNotification } from "@/lib/notifications/web-push";
+import { NotificationReportDialog } from "@/components/notifications/NotificationReportDialog";
+import { EmailAuditDialog } from "@/components/notifications/EmailAuditDialog";
 
 const SPLIT_LABEL = { equal: "Split equally", exact: "Exact amounts", percentage: "By percentage", individual: "Individual expense" } as const;
 
@@ -34,6 +36,8 @@ export function ExpenseDetailDialog({ expense, onOpenChange }: { expense: Expens
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notifying, setNotifying] = useState(false);
+  const [report, setReport] = useState<NotificationDeliveryReport | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
   const e = expense;
 
   async function pushNotification() {
@@ -47,9 +51,16 @@ export function ExpenseDetailDialog({ expense, onOpenChange }: { expense: Expens
           appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
         },
       });
-      toast.success(res.message);
+      setReport(res);
+      if (res.acceptedCount > 0) {
+        toast.success(res.summaryMessage);
+      } else if (!res.providerConfigured) {
+        toast.warning(res.summaryMessage);
+      } else {
+        toast.error(res.summaryMessage);
+      }
       showBrowserNotification(`Expense Notification: ${e.title}`, {
-        body: `${fmt(e.amount_minor)} — Push sent to members.`,
+        body: `${fmt(e.amount_minor)} — Notification report available.`,
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to send push notification");
@@ -147,7 +158,7 @@ export function ExpenseDetailDialog({ expense, onOpenChange }: { expense: Expens
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this expense?</AlertDialogTitle>
+            <DialogTitle>Delete this expense?</DialogTitle>
             <AlertDialogDescription>Everyone's balance will be recalculated. This can't be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -158,6 +169,19 @@ export function ExpenseDetailDialog({ expense, onOpenChange }: { expense: Expens
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <NotificationReportDialog
+        report={report}
+        open={!!report}
+        onOpenChange={(v) => !v && setReport(null)}
+        onOpenAudit={() => setAuditOpen(true)}
+      />
+
+      <EmailAuditDialog
+        groupId={group.id}
+        open={auditOpen}
+        onOpenChange={setAuditOpen}
+      />
     </>
   );
 }

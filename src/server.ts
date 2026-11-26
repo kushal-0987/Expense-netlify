@@ -50,6 +50,17 @@ function isH3SwallowedErrorBody(body: string): boolean {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      const url = new URL(request.url);
+      if (url.pathname === "/api/webhooks/resend" && request.method === "POST") {
+        const { handleResendWebhook } = await import("./lib/notifications/webhook-handler.server");
+        const rawBody = await request.text();
+        const { status, body } = await handleResendWebhook(rawBody, request.headers);
+        return new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);
