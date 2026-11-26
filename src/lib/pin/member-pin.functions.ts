@@ -6,7 +6,7 @@ const uuidRe = /^[0-9a-f-]{36}$/i;
 
 async function derivePassword(memberId: string, pin: string) {
   const secret = process.env["MEMBER_PIN_SECRET"];
-  if (!secret) throw new Error("PIN login is not configured");
+  if (!secret) throw new Error("PIN login is not configured. Add MEMBER_PIN_SECRET to environment variables.");
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${memberId}:${pin}`));
   return Array.from(new Uint8Array(sig), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -48,7 +48,7 @@ export const setMemberPin = createServerFn({ method: "POST" })
         email: pinEmail(member.id), password, email_confirm: true,
         user_metadata: { full_name: member.name, pin_member: true },
       });
-      if (e || !created.user) throw new Error("Could not create the PIN login");
+      if (e || !created.user) throw new Error(e?.message || "Could not create the PIN login");
       authId = created.user.id;
       const { error: le } = await sb.from("group_members").update({ user_id: authId }).eq("id", member.id);
       if (le) throw new Error("Could not link the PIN login");
@@ -85,34 +85,71 @@ export const getInvite = createServerFn({ method: "POST" })
     const sb = await admin();
     const { data: group } = await sb.from("groups").select("id, name").eq("invite_token", data.token).maybeSingle();
     if (!group) return null;
-    const { data: members } = await sb.from("group_members").select("id, name").eq("group_id", group.id).eq("status", "active").order("name");
+    const { data: members } = await sb
+      .from("group_members")
+      .select("id, name, email")
+      .eq("group_id", group.id)
+      .eq("status", "active")
+      .order("name");
     const ids = (members ?? []).map((m) => m.id);
     const { data: pins } = ids.length ? await sb.from("member_pins").select("member_id").in("member_id", ids) : { data: [] };
     const withPin = new Set((pins ?? []).map((p) => p.member_id));
-    return { name: group.name, members: (members ?? []).filter((m) => withPin.has(m.id)) };
+    return {
+      name: group.name,
+      members: (members ?? [])
+        .filter((m) => withPin.has(m.id))
+        .map((m) => ({ id: m.id, name: m.name, hasEmail: !!m.email })),
+    };
   });
 
-/** Public: log in with the invite link + member + PIN. Returns a session. */
+/** Public: log in with the invite link + (Gmail or member selection) + PIN. Returns a session. */
 export const pinLogin = createServerFn({ method: "POST" })
-  .inputValidator((d: { token: string; memberId: string; pin: string }) => {
-    if (!/^[0-9a-f]{16,64}$/.test(d.token) || !uuidRe.test(d.memberId)) throw new Error("Invalid link");
+  .inputValidator((d: { token: string; email?: string; memberId?: string; pin: string }) => {
+    if (!/^[0-9a-f]{16,64}$/.test(d.token)) throw new Error("Invalid link");
+    const cleanEmail = d.email?.trim().toLowerCase();
+    if (!cleanEmail && (!d.memberId || !uuidRe.test(d.memberId))) {
+      throw new Error("Enter your Gmail or choose your name");
+    }
     if (!isValidPin(d.pin)) throw new Error("Wrong PIN");
-    return d;
+    return { token: d.token, email: cleanEmail, memberId: d.memberId, pin: d.pin };
   })
   .handler(async ({ data }) => {
     const sb = await admin();
     const { data: group } = await sb.from("groups").select("id").eq("invite_token", data.token).maybeSingle();
     if (!group) throw new Error("This invite link is no longer valid");
-    const { data: member } = await sb.from("group_members").select("id, status").eq("id", data.memberId).eq("group_id", group.id).maybeSingle();
-    if (!member || member.status !== "active") throw new Error("Member not found");
+
+    let member: { id: string; status: string; email: string | null } | null = null;
+    if (data.email) {
+      const { data: m } = await sb
+        .from("group_members")
+        .select("id, status, email")
+        .eq("group_id", group.id)
+        .eq("status", "active")
+        .ilike("email", data.email)
+        .maybeSingle();
+      member = m;
+    } else if (data.memberId) {
+      const { data: m } = await sb
+        .from("group_members")
+        .select("id, status, email")
+        .eq("id", data.memberId)
+        .eq("group_id", group.id)
+        .maybeSingle();
+      member = m;
+    }
+
+    if (!member || member.status !== "active") {
+      throw new Error(data.email ? "No active household member found with that Gmail" : "Member not found");
+    }
     const { data: pin } = await sb.from("member_pins").select("*").eq("member_id", member.id).maybeSingle();
-    if (!pin) throw new Error("No PIN has been set for this member");
+    if (!pin) throw new Error("No PIN has been set for this member yet");
     const now = new Date();
     if (isLocked(pin.locked_until, now)) throw new Error("Too many wrong tries. Try again in 15 minutes.");
 
     const { createClient } = await import("@supabase/supabase-js");
-    const key = process.env["SUPABASE_PUBLISHABLE_KEY"]!;
-    const pub = createClient(process.env["SUPABASE_URL"]!, key, {
+    const key = process.env["SUPABASE_PUBLISHABLE_KEY"] || process.env["VITE_SUPABASE_PUBLISHABLE_KEY"]!;
+    const supabaseUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"]!;
+    const pub = createClient(supabaseUrl, key, {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { fetch: (input, init) => {
         const h = new Headers(init?.headers);
@@ -124,7 +161,7 @@ export const pinLogin = createServerFn({ method: "POST" })
     const { data: auth, error } = await pub.auth.signInWithPassword({ email: pinEmail(member.id), password: await derivePassword(member.id, data.pin) });
     if (error || !auth.session) {
       await sb.from("member_pins").update(afterFailedAttempt(pin.failed_attempts, now)).eq("member_id", member.id);
-      throw new Error("Wrong PIN");
+      throw new Error("Wrong Gmail or PIN");
     }
     await sb.from("member_pins").update({ failed_attempts: 0, locked_until: null }).eq("member_id", member.id);
     return { access_token: auth.session.access_token, refresh_token: auth.session.refresh_token };

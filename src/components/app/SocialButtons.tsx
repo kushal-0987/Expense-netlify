@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { useNavigate } from "@tanstack/react-router";
+import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 
@@ -17,18 +17,22 @@ function GoogleLogo() {
 
 export function SocialButtons() {
   const [busy, setBusy] = useState(false);
-  const navigate = useNavigate();
 
   async function signInWithGoogle() {
     setBusy(true);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({ provider: "google" });
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth`,
+        },
+      });
       if (error) throw error;
-      toast.success("Signed in with Google successfully!");
-      navigate({ to: "/dashboard", replace: true });
+      if (!data?.url) {
+        setBusy(false);
+      }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not sign in with Google.");
-    } finally {
+      toast.error(err instanceof Error ? err.message : "Could not start Google sign in.");
       setBusy(false);
     }
   }
@@ -41,8 +45,9 @@ export function SocialButtons() {
         size="lg"
         className="w-full gap-2.5 shadow-sm hover:shadow"
         disabled={busy}
-        onClick={signInWithGoogle}>
-        <GoogleLogo />
+        onClick={signInWithGoogle}
+      >
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleLogo />}
         Continue with Google
       </Button>
     </div>

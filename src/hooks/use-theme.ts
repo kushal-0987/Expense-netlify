@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
 export type Theme = "light" | "dark";
-export const THEME_KEY = "fet.theme";
+export const THEME_KEY = "fet.theme.v2";
 
-/** Inline script run before paint so the saved theme never flashes. */
-export const themeInitScript = `(function(){try{var t=localStorage.getItem("${THEME_KEY}");if(!t){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}if(t==="dark")document.documentElement.classList.add("dark")}catch(e){}})();`;
+/** Inline script run before paint so the saved theme never flashes. Defaults to light theme. */
+export const themeInitScript = `(function(){try{var t=localStorage.getItem("${THEME_KEY}");if(t==="dark"){document.documentElement.classList.add("dark")}else{document.documentElement.classList.remove("dark")}}catch(e){}})();`;
 
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>("light");

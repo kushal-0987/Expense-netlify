@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Loader2, MailCheck } from "lucide-react";
+import { CheckCircle2, Eye, EyeOff, Loader2, MailCheck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,7 @@ function AuthPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<null | "confirm" | "reset">(null);
 
@@ -60,16 +61,21 @@ function AuthPage() {
         navigate({ to: "/dashboard", replace: true });
       } else if (mode === "signup") {
         if (password.length < 8) throw new Error("Use at least 8 characters for your password.");
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
           options: {
+            emailRedirectTo: `${window.location.origin}/auth`,
             data: { full_name: name.trim() },
           },
         });
         if (error) throw error;
-        toast.success("Account created successfully!");
-        navigate({ to: "/dashboard", replace: true });
+        if (data.session) {
+          toast.success("Account created successfully!");
+          navigate({ to: "/dashboard", replace: true });
+        } else {
+          setSent("confirm");
+        }
       } else {
         const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: `${window.location.origin}/reset-password`,
@@ -170,7 +176,27 @@ function AuthPage() {
                         </button>
                       )}
                     </div>
-                    <Input id="password" type="password" required minLength={mode === "signup" ? 8 : 1} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete={mode === "signup" ? "new-password" : "current-password"} />
+                    <div className="relative">
+                      <Input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        required
+                        minLength={mode === "signup" ? 8 : 1}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                   </div>
                 )}
                 <Button type="submit" size="lg" className="w-full" disabled={busy}>
