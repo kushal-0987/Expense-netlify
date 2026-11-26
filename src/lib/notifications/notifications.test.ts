@@ -144,3 +144,44 @@ describe("Resend Webhook Signature Verification", () => {
     expect(isValid).toBe(false);
   });
 });
+
+describe("Email Resilience, Fallback & Retry Controls", () => {
+  it("gracefully fails without throwing when both Resend and Gmail SMTP are unavailable", async () => {
+    const origResend = process.env.RESEND_API_KEY;
+    const origGmailUser = process.env.GMAIL_USER;
+    const origGmailPass = process.env.GMAIL_APP_PASSWORD;
+    delete process.env.RESEND_API_KEY;
+    delete process.env.VITE_RESEND_API_KEY;
+    delete process.env.GMAIL_USER;
+    delete process.env.GMAIL_APP_PASSWORD;
+
+    const { attemptProviderDelivery } = await import("./email-service.server");
+    const { isGmailSmtpConfigured } = await import("./gmail-smtp.server");
+
+    expect(isGmailSmtpConfigured()).toBe(false);
+
+    const res = await attemptProviderDelivery({
+      to: "member@example.com",
+      subject: "Test resilience",
+      html: "<p>Hello</p>",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.transientError).toBe(false);
+    expect(res.error).toContain("No email provider configured");
+
+    if (origResend) process.env.RESEND_API_KEY = origResend;
+    if (origGmailUser) process.env.GMAIL_USER = origGmailUser;
+    if (origGmailPass) process.env.GMAIL_APP_PASSWORD = origGmailPass;
+  });
+
+  it("caps retries cleanly and prevents infinite retry loops", async () => {
+    const { computeNextRetryIso } = await import("./email-service.server");
+
+    expect(computeNextRetryIso(0)).toBeTruthy();
+    expect(computeNextRetryIso(1)).toBeTruthy();
+    expect(computeNextRetryIso(2)).toBeTruthy();
+    expect(computeNextRetryIso(3)).toBeNull();
+    expect(computeNextRetryIso(10)).toBeNull();
+  });
+});

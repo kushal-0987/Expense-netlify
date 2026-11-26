@@ -319,18 +319,24 @@ export type Database = {
           delivered_at: string | null
           error_message: string | null
           group_id: string
+          html_body: string | null
           id: string
           idempotency_key: string | null
+          max_retries: number
           metadata: Json | null
+          next_retry_at: string | null
           notification_id: string | null
           notification_type: string
+          provider: string | null
           recipient_email: string
           recipient_member_id: string | null
           recipient_name: string | null
           resend_email_id: string | null
+          retry_count: number
           sent_at: string | null
           status: string
           subject: string
+          text_body: string | null
           updated_at: string
         }
         Insert: {
@@ -338,18 +344,24 @@ export type Database = {
           delivered_at?: string | null
           error_message?: string | null
           group_id: string
+          html_body?: string | null
           id?: string
           idempotency_key?: string | null
+          max_retries?: number
           metadata?: Json | null
+          next_retry_at?: string | null
           notification_id?: string | null
           notification_type: string
+          provider?: string | null
           recipient_email: string
           recipient_member_id?: string | null
           recipient_name?: string | null
           resend_email_id?: string | null
+          retry_count?: number
           sent_at?: string | null
           status?: string
           subject: string
+          text_body?: string | null
           updated_at?: string
         }
         Update: {
@@ -357,18 +369,24 @@ export type Database = {
           delivered_at?: string | null
           error_message?: string | null
           group_id?: string
+          html_body?: string | null
           id?: string
           idempotency_key?: string | null
+          max_retries?: number
           metadata?: Json | null
+          next_retry_at?: string | null
           notification_id?: string | null
           notification_type?: string
+          provider?: string | null
           recipient_email?: string
           recipient_member_id?: string | null
           recipient_name?: string | null
           resend_email_id?: string | null
+          retry_count?: number
           sent_at?: string | null
           status?: string
           subject?: string
+          text_body?: string | null
           updated_at?: string
         }
         Relationships: [

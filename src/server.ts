@@ -61,6 +61,47 @@ export default {
         });
       }
 
+      if (url.pathname === "/api/notifications/process" && request.method === "POST") {
+        try {
+          const body = await request.json().catch(() => ({})) as { groupId?: string };
+          const groupId = typeof body?.groupId === "string" && /^[0-9a-f-]{36}$/i.test(body.groupId)
+            ? body.groupId
+            : undefined;
+          const { processEmailQueue } = await import("./lib/notifications/queue-processor.server");
+          const result = await processEmailQueue({ groupId, limit: 10 });
+          return new Response(JSON.stringify({ ok: true, ...result }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          console.error("[/api/notifications/process] Non-fatal error:", err);
+          return new Response(JSON.stringify({ ok: false }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+
+      if (url.pathname === "/api/cron/process-emails" && (request.method === "GET" || request.method === "POST")) {
+        const cronSecret = process.env["CRON_SECRET"];
+        if (cronSecret) {
+          const authHeader = request.headers.get("authorization") ?? "";
+          if (authHeader !== `Bearer ${cronSecret}`) {
+            return new Response("Unauthorized", { status: 401 });
+          }
+        } else if (process.env["LOVABLE_CRON_SECRET"]) {
+          const { authenticateCronRequest } = await import("./integrations/supabase/cron-auth");
+          const denied = await authenticateCronRequest(request);
+          if (denied) return denied;
+        }
+        const { processEmailQueue } = await import("./lib/notifications/queue-processor.server");
+        const result = await processEmailQueue({ limit: 20 });
+        return new Response(JSON.stringify({ ok: true, ...result }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

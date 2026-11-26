@@ -9,7 +9,7 @@ import { CATEGORIES, type Category } from "@/lib/categories";
 import { currencySymbol, minorToInput, parseMoney, formatPercent } from "@/lib/finance/money";
 import { computeShares, evenPercents, type SplitMethod, type SplitRow } from "@/lib/finance/split";
 import { saveExpense } from "@/lib/data/api";
-import { notifyExpense } from "@/lib/notifications/notification.functions";
+import { enqueueExpenseNotifications } from "@/lib/notifications/notification.functions";
 import { showBrowserNotification } from "@/lib/notifications/web-push";
 import { nowTime, todayISO } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,7 @@ const METHODS: { value: SplitMethod; label: string; hint: string }[] = [
 export function ExpenseForm({ expense }: { expense?: Expense | undefined }) {
   const { group, activeMembers, members, me, settings, fmt, refresh } = useGroup();
   const navigate = useNavigate();
-  const sendNotify = useServerFn(notifyExpense);
+  const enqueueNotify = useServerFn(enqueueExpenseNotifications);
   const [notifyPush, setNotifyPush] = useState(true);
   // Editing keeps members who have since become inactive but are on the expense.
   const formMembers = useMemo(() => {
@@ -114,33 +114,37 @@ export function ExpenseForm({ expense }: { expense?: Expense | undefined }) {
         participants: result.shares,
       });
 
-      if (notifyPush && (savedId || expense?.id)) {
-        const targetId = savedId || expense!.id;
-        try {
-          const res = await sendNotify({
-            data: {
-              expenseId: targetId,
-              groupId: group.id,
-              appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
-            },
-          });
-          if (res.acceptedCount > 0) {
-            toast.success(res.summaryMessage);
-          } else if (!res.providerConfigured) {
-            toast.warning(res.summaryMessage);
-          } else {
-            toast.error(res.summaryMessage);
-          }
-          showBrowserNotification(`Expense Added: ${title.trim()}`, {
-            body: `${fmt(amountMinor)} paid. Push notification sent to members.`,
-          });
-        } catch (pushErr) {
-          console.warn("Could not dispatch push notification:", pushErr);
-        }
-      }
-
       await refresh();
       toast.success(expense ? "Expense updated" : "Expense added");
+
+      if (notifyPush && (savedId || expense?.id)) {
+        const targetId = savedId || expense!.id;
+        // Enqueue in background and trigger dedicated queue processor — never blocks expense save or navigation
+        void enqueueNotify({
+          data: {
+            expenseId: targetId,
+            groupId: group.id,
+            sendEmail: true,
+            appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+          },
+        })
+          .then((res) => {
+            if (res.queuedCount > 0 && typeof window !== "undefined") {
+              fetch("/api/notifications/process", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ groupId: group.id }),
+                keepalive: true,
+              }).catch(() => {});
+            }
+          })
+          .catch(() => {});
+
+        showBrowserNotification(`Expense Added: ${title.trim()}`, {
+          body: `${fmt(amountMinor)} saved. Notifications queued in background.`,
+        });
+      }
+
       navigate({ to: "/expenses" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save the expense");

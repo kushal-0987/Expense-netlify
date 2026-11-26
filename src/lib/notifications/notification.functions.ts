@@ -2,7 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { formatMoney } from "@/lib/finance/money";
 import { renderExpenseHtml, renderDueReminderHtml } from "./email-templates";
-import { isResendConfigured } from "./resend-client.server";
 
 const DEFAULT_APP_URL = "https://expense-netlify.vercel.app";
 
@@ -61,7 +60,7 @@ export const notifyExpense = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }): Promise<NotificationDeliveryReport> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { sendTrackedEmail } = await import("./email-service.server");
+    const { sendTrackedEmail, isAnyEmailProviderConfigured } = await import("./email-service.server");
 
     // 1. Fetch household
     const { data: group, error: groupErr } = await supabaseAdmin
@@ -109,7 +108,7 @@ export const notifyExpense = createServerFn({ method: "POST" })
     let inAppCount = 0;
     const acceptedList: EmailRecipientResult[] = [];
     const failedList: EmailRecipientResult[] = [];
-    const resendConfigured = isResendConfigured();
+    const resendConfigured = isAnyEmailProviderConfigured();
 
     // 4. In-App Notification Channel: Always deliver to linked user accounts
     for (const member of members) {
@@ -261,7 +260,7 @@ export const notifyDue = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { sendTrackedEmail } = await import("./email-service.server");
+    const { sendTrackedEmail, isAnyEmailProviderConfigured } = await import("./email-service.server");
 
     // 1. Fetch group
     const { data: group, error: groupErr } = await supabaseAdmin
@@ -342,7 +341,7 @@ export const notifyDue = createServerFn({ method: "POST" })
       },
     });
 
-    const resendConfigured = isResendConfigured();
+    const resendConfigured = isAnyEmailProviderConfigured();
 
     return {
       success: emailResult.success,
@@ -379,6 +378,7 @@ export const notifyAllDues = createServerFn({ method: "POST" })
     }
   )
   .handler(async ({ data }): Promise<NotificationDeliveryReport> => {
+    const { isAnyEmailProviderConfigured } = await import("./email-service.server");
     const acceptedList: EmailRecipientResult[] = [];
     const failedList: EmailRecipientResult[] = [];
     let inAppCount = 0;
@@ -422,7 +422,7 @@ export const notifyAllDues = createServerFn({ method: "POST" })
       }
     }
 
-    const resendConfigured = isResendConfigured();
+    const resendConfigured = isAnyEmailProviderConfigured();
     const total = data.dues.length;
     const acceptedCount = acceptedList.length;
     const failedCount = failedList.length;
@@ -507,7 +507,133 @@ export const getEmailDeliveryLogs = createServerFn({ method: "POST" })
   });
 
 /**
- * Allows administrators to retry sending a previously failed email log.
+ * Non-blocking enqueue for expense notifications.
+ * Only writes in-app notifications and persistent `pending` email jobs to the DB.
+ * Never calls external email APIs directly, so expense saves finish immediately.
+ */
+export const enqueueExpenseNotifications = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    (d: {
+      expenseId: string;
+      groupId: string;
+      sendEmail?: boolean;
+      appUrl?: string;
+    }) => {
+      if (!/^[0-9a-f-]{36}$/i.test(d.groupId)) throw new Error("Invalid household ID");
+      if (!/^[0-9a-f-]{36}$/i.test(d.expenseId)) throw new Error("Invalid expense ID");
+      return {
+        expenseId: d.expenseId,
+        groupId: d.groupId,
+        sendEmail: d.sendEmail !== false,
+        appUrl: d.appUrl,
+      };
+    }
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { enqueueEmailJob } = await import("./email-service.server");
+
+    try {
+      const { data: group } = await supabaseAdmin
+        .from("groups")
+        .select("id, name, currency")
+        .eq("id", data.groupId)
+        .single();
+      if (!group) return { queuedCount: 0, inAppCount: 0 };
+
+      const { data: expense } = await supabaseAdmin
+        .from("expenses")
+        .select(`
+          id, title, amount_minor, category, expense_date, expense_time, paid_by, notes, description,
+          participants:expense_participants(member_id, share_minor)
+        `)
+        .eq("id", data.expenseId)
+        .eq("group_id", data.groupId)
+        .single();
+      if (!expense) return { queuedCount: 0, inAppCount: 0 };
+
+      const { data: members } = await supabaseAdmin
+        .from("group_members")
+        .select("id, user_id, name, email, status")
+        .eq("group_id", data.groupId)
+        .eq("status", "active");
+      if (!members) return { queuedCount: 0, inAppCount: 0 };
+
+      const payerName = members.find((m) => m.id === expense.paid_by)?.name ?? "A member";
+      const amountFormatted = formatMoney(expense.amount_minor, group.currency);
+      const appUrl = (data.appUrl || getBaseAppUrl()) + "/expenses";
+
+      let inAppCount = 0;
+      let queuedCount = 0;
+
+      for (const member of members) {
+        const participant = (expense.participants as { member_id: string; share_minor: number }[] | null)?.find(
+          (p) => p.member_id === member.id
+        );
+        const isPayer = member.id === expense.paid_by;
+        const shareFormatted = participant
+          ? formatMoney(participant.share_minor, group.currency)
+          : isPayer
+            ? "You paid the total"
+            : undefined;
+
+        if (member.user_id) {
+          try {
+            await supabaseAdmin.from("notifications").insert({
+              user_id: member.user_id,
+              group_id: data.groupId,
+              type: "expense_added",
+              title: `New expense: ${expense.title}`,
+              body: `${payerName} paid ${amountFormatted}${shareFormatted ? ` · Share: ${shareFormatted}` : ""}`,
+              link: "/expenses",
+            });
+            inAppCount++;
+          } catch {
+            // non-fatal
+          }
+        }
+
+        if (data.sendEmail && member.email && member.email.trim().length > 0) {
+          const { subject, html, text } = renderExpenseHtml({
+            householdName: group.name,
+            expenseTitle: expense.title,
+            category: expense.category,
+            amountFormatted,
+            paidByName: payerName,
+            dateFormatted: expense.expense_date,
+            timeFormatted: expense.expense_time?.slice(0, 5),
+            memberShareFormatted: shareFormatted,
+            notes: expense.notes || expense.description || undefined,
+            appUrl,
+          });
+
+          const qRes = await enqueueEmailJob({
+            groupId: data.groupId,
+            recipientEmail: member.email,
+            recipientName: member.name,
+            recipientMemberId: member.id,
+            subject,
+            html,
+            text,
+            notificationType: "expense_added",
+            idempotencyKey: `expense-${expense.id}-${member.id}`,
+            metadata: { expenseId: expense.id, amountMinor: expense.amount_minor },
+          });
+
+          if (qRes.enqueued) queuedCount++;
+        }
+      }
+
+      return { queuedCount, inAppCount };
+    } catch (err) {
+      console.warn("[EnqueueExpenseNotifications] Non-fatal error:", err);
+      return { queuedCount: 0, inAppCount: 0 };
+    }
+  });
+
+/**
+ * Allows administrators to retry sending a previously failed email log without duplicating rows.
  */
 export const retryEmailLog = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -518,7 +644,7 @@ export const retryEmailLog = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { sendTrackedEmail } = await import("./email-service.server");
+    const { attemptProviderDelivery, updateEmailLog } = await import("./email-service.server");
 
     const { data: log, error } = await supabaseAdmin
       .from("email_logs")
@@ -529,27 +655,46 @@ export const retryEmailLog = createServerFn({ method: "POST" })
 
     if (error || !log) throw new Error("Email log record not found");
 
-    // Clear previous error and set to pending
-    await supabaseAdmin
-      .from("email_logs")
-      .update({ status: "pending", error_message: null, updated_at: new Date().toISOString() })
-      .eq("id", log.id);
-
-    const retryResult = await sendTrackedEmail({
-      groupId: log.group_id,
-      recipientEmail: log.recipient_email,
-      recipientName: log.recipient_name,
-      recipientMemberId: log.recipient_member_id,
+    const delivery = await attemptProviderDelivery({
+      to: log.recipient_email,
       subject: log.subject,
-      html: `<p>${log.subject}</p>`,
-      notificationType: log.notification_type as "expense_added" | "due_reminder" | "custom",
-      idempotencyKey: `retry-${log.id}-${Date.now()}`,
+      html: log.html_body || `<p>${log.subject}</p>`,
+      text: log.text_body,
+      idempotencyKey: log.idempotency_key ? `${log.idempotency_key}-retry-${(log.retry_count ?? 0) + 1}` : undefined,
+    });
+
+    const nextRetryCount = (log.retry_count ?? 0) + 1;
+
+    if (delivery.success) {
+      const finalStatus = delivery.provider === "gmail_smtp" ? "delivered" : "accepted";
+      await updateEmailLog(log.id, {
+        status: finalStatus,
+        provider: delivery.provider,
+        resendEmailId: delivery.emailId || null,
+        errorMessage: null,
+        sentAt: new Date().toISOString(),
+        nextRetryAt: null,
+        retryCount: nextRetryCount,
+        ...(finalStatus === "delivered" ? { deliveredAt: new Date().toISOString() } : {}),
+      });
+      return {
+        success: true,
+        status: finalStatus,
+        message: `Email successfully resent via ${delivery.provider === "gmail_smtp" ? "Gmail SMTP" : "Resend"}!`,
+      };
+    }
+
+    await updateEmailLog(log.id, {
+      status: "failed",
+      errorMessage: delivery.error || "Retry failed.",
+      retryCount: nextRetryCount,
+      nextRetryAt: null,
     });
 
     return {
-      success: retryResult.success,
-      status: retryResult.status,
-      error: retryResult.error,
-      message: retryResult.success ? "Email successfully resent!" : `Retry failed: ${retryResult.error}`,
+      success: false,
+      status: "failed",
+      error: delivery.error,
+      message: `Retry failed: ${delivery.error}`,
     };
   });
