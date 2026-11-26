@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { LovableMark } from "@lovable.dev/cloud-auth-js/react";
-import { lovable } from "@/integrations/lovable/index";
+import { useNavigate } from "@tanstack/react-router";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 
 function GoogleLogo() {
@@ -16,31 +16,34 @@ function GoogleLogo() {
 }
 
 export function SocialButtons() {
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const navigate = useNavigate();
 
-  async function signIn(provider: "google" | "lovable") {
-    setBusy(provider);
-    const result = await lovable.auth.signInWithOAuth(provider, {
-      redirect_uri: `${window.location.origin}/auth`,
-    });
-    if (result.error) {
-      toast.error(result.error.message ?? "Could not sign in. Please try again.");
-      setBusy(null);
-      return;
+  async function signInWithGoogle() {
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({ provider: "google" });
+      if (error) throw error;
+      toast.success("Signed in with Google successfully!");
+      navigate({ to: "/dashboard", replace: true });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not sign in with Google.");
+    } finally {
+      setBusy(false);
     }
-    if (result.redirected) return;
-    setBusy(null);
   }
 
   return (
     <div className="grid gap-2.5">
-      <Button type="button" variant="google" size="lg" className="w-full gap-2.5" disabled={!!busy} onClick={() => signIn("google")}>
+      <Button
+        type="button"
+        variant="google"
+        size="lg"
+        className="w-full gap-2.5 shadow-sm hover:shadow"
+        disabled={busy}
+        onClick={signInWithGoogle}>
         <GoogleLogo />
         Continue with Google
-      </Button>
-      <Button type="button" variant="outline" size="lg" className="w-full gap-2.5 font-medium" disabled={!!busy} onClick={() => signIn("lovable")}>
-        <LovableMark className="size-[18px]" />
-        Continue with Lovable
       </Button>
     </div>
   );

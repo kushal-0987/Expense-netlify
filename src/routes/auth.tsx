@@ -56,20 +56,20 @@ function AuthPage() {
       if (mode === "signin") {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (error) throw error;
+        toast.success("Welcome back!");
         navigate({ to: "/dashboard", replace: true });
       } else if (mode === "signup") {
         if (password.length < 8) throw new Error("Use at least 8 characters for your password.");
-        const { data, error } = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth`,
             data: { full_name: name.trim() },
           },
         });
         if (error) throw error;
-        if (data.session) navigate({ to: "/dashboard", replace: true });
-        else setSent("confirm");
+        toast.success("Account created successfully!");
+        navigate({ to: "/dashboard", replace: true });
       } else {
         const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: `${window.location.origin}/reset-password`,
