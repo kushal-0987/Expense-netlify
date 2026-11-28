@@ -69,6 +69,7 @@ export async function sendViaGmailSmtp(params: {
     const fromHeader = process.env["EMAIL_FROM"] || `Family Expense Tracker <${config.user}>`;
     const info = await transporter.sendMail({
       from: fromHeader || getEmailFrom(),
+      replyTo: config.user,
       to: params.to,
       subject: params.subject,
       html: params.html,

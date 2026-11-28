@@ -13,26 +13,21 @@ export interface ExpenseEmailData {
 }
 
 export function renderExpenseHtml(data: ExpenseEmailData): { subject: string; html: string; text: string } {
-  const subject = `[${data.householdName}] New Expense: ${data.expenseTitle} (${data.amountFormatted})`;
-  const support = data.supportEmail || "support@expense-netlify.vercel.app";
+  const subject = `${data.householdName}: ${data.expenseTitle} (${data.amountFormatted})`;
   const dateTime = data.timeFormatted ? `${data.dateFormatted} at ${data.timeFormatted}` : data.dateFormatted;
 
   const text = [
-    `FAMILY EXPENSE TRACKER`,
-    `Household: ${data.householdName}`,
+    `${data.householdName} — Family Expense Tracker`,
     `----------------------------------------`,
-    `NEW EXPENSE RECORDED`,
-    `Title: ${data.expenseTitle}`,
-    `Amount: ${data.amountFormatted}`,
-    `Paid by: ${data.paidByName}`,
+    `${data.paidByName} added a new expense: ${data.expenseTitle}`,
+    `Total Amount: ${data.amountFormatted}`,
     `Date: ${dateTime}`,
     `Category: ${data.category}`,
-    data.memberShareFormatted ? `Your Calculated Share: ${data.memberShareFormatted}` : "",
+    data.memberShareFormatted ? `Your Share: ${data.memberShareFormatted}` : "",
     data.notes ? `Notes: ${data.notes}` : "",
     ``,
-    `View in Family Expense Tracker: ${data.appUrl}`,
-    ``,
-    `Need help? Contact ${support}`,
+    `View details: ${data.appUrl}`,
+    data.supportEmail ? `Questions? Reply to ${data.supportEmail}` : "",
   ].filter(Boolean).join("\n");
 
   const html = `
@@ -148,9 +143,8 @@ export function renderExpenseHtml(data: ExpenseEmailData): { subject: string; ht
 
       <!-- Footer -->
       <tr>
-        <td style="background-color: #f8fafc; border-top: 1px solid #f1f5f9; padding: 20px 30px; text-align: center; font-size: 12px; color: #94a3b8; line-height: 1.6;">
-          This is an automated notification from ${escapeHtml(data.householdName)} on Family Expense Tracker.<br />
-          If you have questions, contact your household administrator or email <a href="mailto:${support}" style="color: #64748b; text-decoration: underline;">${support}</a>.
+        <td style="background-color: #f8fafc; border-top: 1px solid #f1f5f9; padding: 18px 30px; text-align: center; font-size: 12px; color: #64748b; line-height: 1.6;">
+          Sent for ${escapeHtml(data.householdName)} via Family Expense Tracker.${data.supportEmail ? `<br />Reply to <a href="mailto:${escapeHtml(data.supportEmail)}" style="color: #0d9488; text-decoration: underline;">${escapeHtml(data.supportEmail)}</a> if you have any questions.` : ""}
         </td>
       </tr>
     </table>
@@ -174,22 +168,19 @@ export interface DueReminderEmailData {
 }
 
 export function renderDueReminderHtml(data: DueReminderEmailData): { subject: string; html: string; text: string } {
-  const subject = `[${data.householdName}] Payment Reminder: ${data.amountFormatted} due to ${data.receiverName}`;
-  const support = data.supportEmail || "support@expense-netlify.vercel.app";
+  const subject = `${data.householdName}: Payment Reminder — ${data.amountFormatted} due to ${data.receiverName}`;
 
   const text = [
-    `FAMILY EXPENSE TRACKER`,
-    `Household: ${data.householdName}`,
+    `${data.householdName} — Family Expense Tracker`,
     `----------------------------------------`,
-    `PAYMENT REMINDER FOR ${data.debtorName.toUpperCase()}`,
+    `Hi ${data.debtorName},`,
     `Amount Due: ${data.amountFormatted}`,
     `Pay to: ${data.receiverName}`,
     data.receiverEsewa ? `eSewa Number: ${data.receiverEsewa}` : "",
-    data.notes ? `Note from Admin: ${data.notes}` : "",
+    data.notes ? `Note: ${data.notes}` : "",
     ``,
-    `Open Family Expense Tracker to settle up: ${data.appUrl}`,
-    ``,
-    `Need help? Contact ${support}`,
+    `Open to settle up: ${data.appUrl}`,
+    data.supportEmail ? `Questions? Reply to ${data.supportEmail}` : "",
   ].filter(Boolean).join("\n");
 
   const html = `
@@ -299,9 +290,8 @@ export function renderDueReminderHtml(data: DueReminderEmailData): { subject: st
 
       <!-- Footer -->
       <tr>
-        <td style="background-color: #f8fafc; border-top: 1px solid #f1f5f9; padding: 20px 30px; text-align: center; font-size: 12px; color: #94a3b8; line-height: 1.6;">
-          Automated reminder sent from ${escapeHtml(data.householdName)} on Family Expense Tracker.<br />
-          Need assistance? Contact <a href="mailto:${support}" style="color: #64748b; text-decoration: underline;">${support}</a>.
+        <td style="background-color: #f8fafc; border-top: 1px solid #f1f5f9; padding: 18px 30px; text-align: center; font-size: 12px; color: #64748b; line-height: 1.6;">
+          Sent for ${escapeHtml(data.householdName)} via Family Expense Tracker.${data.supportEmail ? `<br />Reply to <a href="mailto:${escapeHtml(data.supportEmail)}" style="color: #0d9488; text-decoration: underline;">${escapeHtml(data.supportEmail)}</a> if you have any questions.` : ""}
         </td>
       </tr>
     </table>
